@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { getStravaSettings, setSystemSetting } from "./system-settings"
 import { getActivitiesByDateRange, getAthleteProfile, getActivityById, countActivitiesByDateRange } from "./strava-api"
 import { getCurrentUser } from "./auth-utils"
+import { getStravaConnection, deleteStravaConnection } from "./strava-connection"
 
 // Initialize the database connection with better error handling
 let sql
@@ -73,6 +74,94 @@ async function executeSqlWithFallback(query, fallbackData, options = {}) {
 
 export { executeSqlWithFallback }
 
+export async function connectStrava() {
+  try {
+    // Get settings from database
+    const settings = await getStravaSettings()
+
+    if (!settings.isConfigured) {
+      throw new Error("Strava API is not configured. Please set up your credentials first.")
+    }
+
+    // Get the base URL from settings or use a fallback
+    const baseUrl = settings.appUrl || process.env.NEXT_PUBLIC_APP_URL
+
+    if (!baseUrl) {
+      throw new Error("App URL is not configured. Please set the APP_URL in your settings.")
+    }
+
+    // Ensure the baseUrl doesn't have a trailing slash
+    const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl
+
+    // Construct the redirect URI - this MUST match exactly what Strava expects
+    const redirectUri = `${normalizedBaseUrl}/api/auth/strava/callback`
+
+    console.log("OAuth Configuration:")
+    console.log("- Base URL:", baseUrl)
+    console.log("- Normalized Base URL:", normalizedBaseUrl)
+    console.log("- Redirect URI:", redirectUri)
+    console.log("- Client ID:", settings.clientId)
+
+    // Validate the redirect URI format
+    try {
+      new URL(redirectUri)
+    } catch (urlError) {
+      throw new Error(`Invalid redirect URI format: ${redirectUri}. Please check your APP_URL setting.`)
+    }
+
+    // Generate the authorization URL with proper scopes for activity access
+    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${settings.clientId}&redirect_uri=${encodeURIComponent(
+      redirectUri,
+    )}&response_type=code&scope=read,activity:read_all&approval_prompt=force`
+
+    console.log("Generated auth URL:", authUrl)
+
+    return { authUrl, redirectUri }
+  } catch (error) {
+    console.error("Failed to generate Strava auth URL:", error)
+    throw new Error(`Failed to connect to Strava: ${error instanceof Error ? error.message : "Unknown error"}`)
+  }
+}
+
+export async function disconnectStrava() {
+  try {
+    const success = await deleteStravaConnection()
+
+    if (!success) {
+      throw new Error("Failed to delete Strava connection")
+    }
+
+    revalidatePath("/settings")
+    revalidatePath("/")
+
+    return { success: true }
+  } catch (error) {
+    console.error("Failed to disconnect from Strava:", error)
+    throw new Error("Failed to disconnect from Strava")
+  }
+}
+
+export async function getStravaConnectionStatus() {
+  try {
+    const connection = await getStravaConnection()
+
+    if (!connection) {
+      return { status: "disconnected" }
+    }
+
+    // Check if the token is expired
+    const expiresAt = new Date(connection.expires_at)
+    if (expiresAt < new Date()) {
+      return { status: "error", message: "Token expired" }
+    }
+
+    return { status: "connected", athleteId: connection.athlete_id }
+  } catch (error) {
+    console.error("Failed to get Strava connection status:", error)
+    return { status: "error", message: "Failed to check connection" }
+  }
+}
+
 export async function testStravaConnection() {
   try {
     console.log("Testing Strava connection...")
@@ -80,38 +169,6 @@ export async function testStravaConnection() {
     // Test the connection by fetching the athlete profile
     const profile = await getAthleteProfile()
     console.log("Athlete profile fetched successfully:", profile.id)
-
-    // Update the athlete_id in the database if it's currently 0 or different
-    const userId = await getCurrentUser()
-    if (!userId?.id) {
-      throw new Error("User not authenticated")
-    }
-
-    const connection = await sql`
-      SELECT * FROM strava_connections 
-      WHERE simple_user_id = ${userId.id}
-      LIMIT 1
-    `
-
-    if (connection.length > 0) {
-      const currentAthleteId = connection[0].athlete_id
-
-      if (currentAthleteId === 0 || currentAthleteId !== profile.id) {
-        console.log(`Updating athlete_id from ${currentAthleteId} to ${profile.id}`)
-
-        await sql`
-          UPDATE strava_connections
-          SET 
-            athlete_id = ${profile.id},
-            updated_at = ${new Date()}
-          WHERE simple_user_id = ${userId.id}
-        `
-
-        console.log("Athlete ID updated successfully")
-      } else {
-        console.log("Athlete ID already correct:", currentAthleteId)
-      }
-    }
 
     return { success: true, profile }
   } catch (error) {
@@ -799,174 +856,12 @@ export async function saveStravaSettings({
 
     await setSystemSetting("APP_URL", appUrl)
 
-    // If access token and refresh token are provided, create a direct connection
-    if (accessToken && refreshToken) {
-      const userId = await getCurrentUser()
-      if (!userId?.id) {
-        throw new Error("User not authenticated")
-      }
-      // Ensure user exists
-      const user = await sql`SELECT * FROM users WHERE id = ${userId.id}`
-
-      if (user.length === 0) {
-        await sql`
-          INSERT INTO users (id, email, name)
-          VALUES (${userId.id}, ${"user@example.com"}, ${"Demo User"})
-        `
-      }
-
-      // Check if a connection already exists
-      const existingConnection = await sql`
-        SELECT * FROM strava_connections 
-        WHERE user_id = ${userId.id}
-        LIMIT 1
-      `
-
-      // Set expiration to 6 hours from now (typical Strava token lifetime)
-      const expiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000)
-
-      if (existingConnection.length > 0) {
-        // Update existing connection
-        await sql`
-          UPDATE strava_connections
-          SET 
-            access_token = ${accessToken},
-            refresh_token = ${refreshToken},
-            expires_at = ${expiresAt},
-            updated_at = ${new Date()}
-          WHERE user_id = ${userId.id}
-        `
-      } else {
-        // Create a new connection with a placeholder athlete ID
-        // In a real scenario, we would fetch the athlete profile to get the real ID
-        await sql`
-          INSERT INTO strava_connections (
-            user_id, 
-            athlete_id, 
-            access_token, 
-            refresh_token, 
-            expires_at, 
-            scope
-          )
-          VALUES (
-            ${userId.id},
-            ${0}, -- Placeholder athlete ID
-            ${accessToken},
-            ${refreshToken},
-            ${expiresAt},
-            ${"read,activity:read_all"}
-          )
-        `
-      }
-    }
-
     revalidatePath("/settings")
 
     return { success: true }
   } catch (error) {
     console.error("Failed to save Strava settings:", error)
     throw new Error("Failed to save Strava settings")
-  }
-}
-
-export async function connectStrava() {
-  try {
-    // Get settings from database
-    const settings = await getStravaSettings()
-
-    if (!settings.isConfigured) {
-      throw new Error("Strava API is not configured. Please set up your credentials first.")
-    }
-
-    // Get the base URL from settings or use a fallback
-    const baseUrl = settings.appUrl || process.env.NEXT_PUBLIC_APP_URL
-
-    if (!baseUrl) {
-      throw new Error("App URL is not configured. Please set the APP_URL in your settings.")
-    }
-
-    // Ensure the baseUrl doesn't have a trailing slash
-    const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl
-
-    // Construct the redirect URI - this MUST match exactly what Strava expects
-    const redirectUri = `${normalizedBaseUrl}/api/auth/strava/callback`
-
-    console.log("OAuth Configuration:")
-    console.log("- Base URL:", baseUrl)
-    console.log("- Normalized Base URL:", normalizedBaseUrl)
-    console.log("- Redirect URI:", redirectUri)
-    console.log("- Client ID:", settings.clientId)
-
-    // Validate the redirect URI format
-    try {
-      new URL(redirectUri)
-    } catch (urlError) {
-      throw new Error(`Invalid redirect URI format: ${redirectUri}. Please check your APP_URL setting.`)
-    }
-
-    // Generate the authorization URL with proper scopes for activity access
-    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${settings.clientId}&redirect_uri=${encodeURIComponent(
-      redirectUri,
-    )}&response_type=code&scope=read,activity:read_all&approval_prompt=force`
-
-    console.log("Generated auth URL:", authUrl)
-
-    return { authUrl, redirectUri }
-  } catch (error) {
-    console.error("Failed to generate Strava auth URL:", error)
-    throw new Error(`Failed to connect to Strava: ${error instanceof Error ? error.message : "Unknown error"}`)
-  }
-}
-
-export async function disconnectStrava() {
-  try {
-    const userId = await getCurrentUser()
-    if (!userId?.id) {
-      throw new Error("User not authenticated")
-    }
-    // In a real app, you would revoke the token with Strava API
-    // For now, we'll just delete the connection from the database
-    await sql`
-      DELETE FROM strava_connections 
-      WHERE user_id = ${userId.id}
-    `
-
-    revalidatePath("/settings")
-    revalidatePath("/")
-
-    return { success: true }
-  } catch (error) {
-    console.error("Failed to disconnect from Strava:", error)
-    throw new Error("Failed to disconnect from Strava")
-  }
-}
-
-export async function getStravaConnectionStatus() {
-  try {
-    const userId = await getCurrentUser()
-    if (!userId?.id) {
-      throw new Error("User not authenticated")
-    }
-    const connection = await sql`
-      SELECT * FROM strava_connections 
-      WHERE user_id = ${userId.id}
-      LIMIT 1
-    `
-
-    if (connection.length === 0) {
-      return { status: "disconnected" }
-    }
-
-    // Check if the token is expired
-    const expiresAt = new Date(connection[0].expires_at)
-    if (expiresAt < new Date()) {
-      return { status: "error", message: "Token expired" }
-    }
-
-    return { status: "connected", athleteId: connection[0].athlete_id }
-  } catch (error) {
-    console.error("Failed to get Strava connection status:", error)
-    return { status: "error", message: "Failed to check connection" }
   }
 }
 
