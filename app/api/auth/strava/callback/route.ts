@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
 
     const userId = user.id
 
-    // Check if a connection already exists
+    // Check if a connection already exists for this user
     const existingConnection = await sql`
       SELECT * FROM strava_connections 
       WHERE simple_user_id = ${userId}
@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
       `
       console.log("Updated existing Strava connection for user:", userId)
     } else {
-      // Create a new connection
+      // Create a new connection using INSERT ... ON CONFLICT to handle race conditions
       await sql`
         INSERT INTO strava_connections (
           user_id, 
@@ -154,8 +154,16 @@ export async function GET(request: NextRequest) {
           NOW(),
           NOW()
         )
+        ON CONFLICT (simple_user_id) 
+        DO UPDATE SET
+          athlete_id = ${tokenData.athlete.id},
+          access_token = ${tokenData.access_token},
+          refresh_token = ${tokenData.refresh_token},
+          expires_at = ${new Date(tokenData.expires_at * 1000)},
+          scope = ${tokenScope},
+          updated_at = NOW()
       `
-      console.log("Created new Strava connection for user:", userId)
+      console.log("Created/updated Strava connection for user:", userId)
     }
 
     // Redirect back to the settings page with success
