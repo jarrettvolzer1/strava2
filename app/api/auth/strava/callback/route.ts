@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
           updated_at
         )
         VALUES (
-          NULL,
+          1,
           ${userId},
           ${tokenData.athlete.id},
           ${tokenData.access_token},
