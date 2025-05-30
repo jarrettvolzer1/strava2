@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
           updated_at
         )
         VALUES (
-          1,
+          ${userId},
           ${userId},
           ${tokenData.athlete.id},
           ${tokenData.access_token},
@@ -154,8 +154,9 @@ export async function GET(request: NextRequest) {
           NOW(),
           NOW()
         )
-        ON CONFLICT (simple_user_id) 
+        ON CONFLICT (user_id) 
         DO UPDATE SET
+          simple_user_id = EXCLUDED.simple_user_id,
           athlete_id = EXCLUDED.athlete_id,
           access_token = EXCLUDED.access_token,
           refresh_token = EXCLUDED.refresh_token,
