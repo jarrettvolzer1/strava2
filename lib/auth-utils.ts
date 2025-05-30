@@ -13,7 +13,8 @@ export interface User {
 export async function getCurrentUser(): Promise<User | null> {
   try {
     const cookieStore = cookies()
-    const sessionToken = cookieStore.get("session-token")?.value
+    // Try both cookie names to be safe
+    const sessionToken = cookieStore.get("session")?.value || cookieStore.get("session-token")?.value
 
     console.log("getCurrentUser - Session token exists:", !!sessionToken)
 

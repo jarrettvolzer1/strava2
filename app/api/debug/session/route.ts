@@ -9,8 +9,8 @@ export async function GET() {
     const cookieStore = cookies()
     const allCookies = cookieStore.getAll()
 
-    // Get session token
-    const sessionToken = cookieStore.get("session-token")?.value
+    // Try both cookie names
+    const sessionToken = cookieStore.get("session")?.value || cookieStore.get("session-token")?.value
 
     // Try to verify the session
     let user = null
@@ -39,7 +39,7 @@ export async function GET() {
       verificationError,
       cookies: allCookies.map((c) => ({
         name: c.name,
-        value: c.name === "session-token" ? "REDACTED" : c.value.substring(0, 10) + "...",
+        value: c.name.includes("session") ? "REDACTED" : c.value.substring(0, 10) + "...",
         path: c.path,
         expires: c.expires,
       })),
