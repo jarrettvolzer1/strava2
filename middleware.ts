@@ -60,8 +60,15 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Protect dashboard and other authenticated routes
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/activities") || pathname.startsWith("/settings")) {
+  // Protect authenticated routes
+  if (
+    pathname.startsWith("/(authenticated)") ||
+    pathname === "/dashboard" ||
+    pathname === "/settings" ||
+    pathname === "/activities" ||
+    pathname === "/activities-client" ||
+    pathname === "/import"
+  ) {
     const sessionToken = request.cookies.get("session")?.value
     if (!sessionToken) {
       return NextResponse.redirect(new URL("/login", request.url))
