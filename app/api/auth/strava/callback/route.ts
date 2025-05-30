@@ -156,11 +156,11 @@ export async function GET(request: NextRequest) {
         )
         ON CONFLICT (simple_user_id) 
         DO UPDATE SET
-          athlete_id = ${tokenData.athlete.id},
-          access_token = ${tokenData.access_token},
-          refresh_token = ${tokenData.refresh_token},
-          expires_at = ${new Date(tokenData.expires_at * 1000)},
-          scope = ${tokenScope},
+          athlete_id = EXCLUDED.athlete_id,
+          access_token = EXCLUDED.access_token,
+          refresh_token = EXCLUDED.refresh_token,
+          expires_at = EXCLUDED.expires_at,
+          scope = EXCLUDED.scope,
           updated_at = NOW()
       `
       console.log("Created/updated Strava connection for user:", userId)
