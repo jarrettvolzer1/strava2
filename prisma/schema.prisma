@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String   @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @map("updated_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  accounts      Account[]
+  sessions      Session[]
+  activities    Activity[]
+  stravaConnections StravaConnection[]
+  importLogs    ImportLog[]
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Activity {
+  id                 Int       @id @default(autoincrement())
+  stravaId           BigInt    @map("strava_id") @unique
+  name               String
+  type               String
+  startDate          DateTime  @map("start_date")
+  elapsedTime        Int       @map("elapsed_time")
+  distance           Decimal
+  totalElevationGain Decimal   @map("total_elevation_gain")
+  averageSpeed       Decimal   @map("average_speed")
+  maxSpeed           Decimal   @map("max_speed")
+  averageHeartrate   Int?      @map("average_heartrate")
+  maxHeartrate       Int?      @map("max_heartrate")
+  startLatlng        Json?     @map("start_latlng")
+  endLatlng          Json?     @map("end_latlng")
+  mapData            Json?     @map("map_data")
+  description        String?
+  rawData            Json?     @map("raw_data")
+  polyline           String?
+  importedAt         DateTime  @map("imported_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  userId             Int       @map("user_id")
+  userIdAuth         String?   @map("user_id_auth")
+  user               User?     @relation(fields: [userIdAuth], references: [id])
+
+  @@map("activities")
+}
+
+model StravaConnection {
+  id           Int       @id @default(autoincrement())
+  userId       Int       @map("user_id")
+  userIdAuth   String?   @map("user_id_auth")
+  athleteId    Int       @map("athlete_id")
+  accessToken  String    @map("access_token")
+  refreshToken String    @map("refresh_token")
+  expiresAt    DateTime  @map("expires_at")
+  scope        String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @map("updated_at")
+  user         User?     @relation(fields: [userIdAuth], references: [id])
+
+  @@map("strava_connections")
+}
+
+model ImportLog {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  userIdAuth      String?   @map("user_id_auth")
+  startDate       DateTime  @map("start_date")
+  endDate         DateTime  @map("end_date")
+  status          String
+  activitiesCount Int?      @map("activities_count")
+  errorMessage    String?   @map("error_message")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  user            User?     @relation(fields: [userIdAuth], references: [id])
+
+  @@map("import_logs")
+}
