@@ -3,6 +3,15 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Settings, LogOut } from "lucide-react"
 
 interface User {
   id: string
@@ -89,12 +98,39 @@ export default function Navbar() {
                     <Button variant="ghost">Admin</Button>
                   </Link>
                 )}
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">{user.username}</span>
-                  <Button onClick={handleLogout} variant="outline" size="sm">
-                    Logout
-                  </Button>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="flex items-center space-x-2 h-auto p-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="text-sm">{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm font-medium">{user.username}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <div className="flex items-center justify-start gap-2 p-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="text-sm">{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex flex-col space-y-1 leading-none">
+                        <p className="font-medium">{user.username}</p>
+                        <p className="text-xs text-muted-foreground">{user.email}</p>
+                      </div>
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/change-password" className="flex items-center">
+                        <Settings className="mr-2 h-4 w-4" />
+                        Change Password
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout} className="flex items-center text-red-600">
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             ) : (
               <Link href="/login">
