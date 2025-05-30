@@ -3,10 +3,10 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { AlertCircle, CheckCircle, Loader2, ExternalLink, Info } from "lucide-react"
+import { AlertCircle, CheckCircle, Loader2, ExternalLink, Info, ChevronDown, ChevronUp } from "lucide-react"
 import { connectStrava, disconnectStrava, testStravaConnection } from "@/lib/actions"
 import { useSearchParams } from "next/navigation"
 
@@ -26,6 +26,23 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
   )
   const [athleteInfo, setAthleteInfo] = useState<any>(null)
   const [errorDetails, setErrorDetails] = useState<any>(null)
+  const [testError, setTestError] = useState<any>(null)
+  const [showDebugInfo, setShowDebugInfo] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<any>(null)
+
+  // Fetch debug info on component mount
+  useEffect(() => {
+    const fetchDebugInfo = async () => {
+      try {
+        const response = await fetch("/api/debug/oauth")
+        const data = await response.json()
+        setDebugInfo(data)
+      } catch (error) {
+        console.error("Failed to fetch debug info:", error)
+      }
+    }
+    fetchDebugInfo()
+  }, [])
 
   // Handle OAuth callback results and errors
   useEffect(() => {
@@ -67,6 +84,7 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
       setIsConnected(true)
       setConnectionStatus("connected")
       setErrorDetails(null)
+      setTestError(null)
     }
   }, [searchParams, toast])
 
@@ -85,6 +103,13 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
       // Redirect to Strava authorization page
       window.location.href = authUrl
     } catch (error) {
+      const errorData = {
+        error: "connection_failed",
+        description: error instanceof Error ? error.message : "Failed to connect to Strava",
+        timestamp: new Date().toISOString(),
+        details: error,
+      }
+      setErrorDetails(errorData)
       toast({
         title: "Connection failed",
         description: error instanceof Error ? error.message : "Failed to connect to Strava",
@@ -95,6 +120,7 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
 
   const handleTest = async () => {
     setIsTesting(true)
+    setTestError(null)
 
     try {
       const { profile } = await testStravaConnection()
@@ -104,9 +130,19 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
         description: `Connected to Strava as ${profile.firstname} ${profile.lastname}`,
       })
       setConnectionStatus("connected")
-      setErrorDetails(null)
+      setTestError(null)
     } catch (error) {
       setConnectionStatus("error")
+      const errorData = {
+        error: "test_failed",
+        description: error instanceof Error ? error.message : "Failed to test Strava connection",
+        timestamp: new Date().toISOString(),
+        details: {
+          message: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+      }
+      setTestError(errorData)
       toast({
         title: "Connection test failed",
         description: error instanceof Error ? error.message : "Failed to connect to Strava",
@@ -126,6 +162,7 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
       setConnectionStatus("disconnected")
       setAthleteInfo(null)
       setErrorDetails(null)
+      setTestError(null)
       toast({
         title: "Disconnected from Strava",
         description: "Your Strava account has been disconnected.",
@@ -154,6 +191,16 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
 
   return (
     <div className="space-y-6">
+      {/* Strava OAuth Authentication Info */}
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>Strava OAuth Authentication</AlertTitle>
+        <AlertDescription>
+          To connect your real Strava account, you need to authorize this application through Strava's OAuth flow. Click
+          the "Connect to Strava" button below to start the authorization process.
+        </AlertDescription>
+      </Alert>
+
       {/* Connection Status */}
       {!isConnected ? (
         <div className="space-y-4">
@@ -234,50 +281,153 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
         </div>
       )}
 
-      {/* Error Details */}
-      {errorDetails && (
+      {/* OAuth Error Details */}
+      {(errorDetails || testError) && (
         <Card className="border-red-200 bg-red-50">
           <CardHeader>
             <CardTitle className="text-red-800 flex items-center">
               <AlertCircle className="mr-2 h-4 w-4" />
-              Connection Error Details
+              {testError ? "Connection Test Error" : "OAuth Error Details"}
             </CardTitle>
             <CardDescription className="text-red-700">
-              Technical information about the connection failure
+              {testError
+                ? "Error occurred while testing the connection"
+                : "Technical information about the OAuth failure"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <p className="font-medium text-sm text-red-800">Error Type:</p>
-                <p className="text-sm text-red-700">{errorDetails.error || "Unknown"}</p>
+                <p className="font-medium text-sm text-red-800 mb-2">Common causes:</p>
+                <ul className="list-disc list-inside text-sm text-red-700 space-y-1">
+                  <li>Incorrect Client ID or Client Secret in Developer API settings</li>
+                  <li>Client ID/Secret from a different Strava application</li>
+                  <li>Strava application not properly configured</li>
+                  <li>Authorization callback domain mismatch</li>
+                  <li>Token expired or invalid</li>
+                </ul>
               </div>
-              <div>
-                <p className="font-medium text-sm text-red-800">Description:</p>
-                <p className="text-sm text-red-700">{errorDetails.description || "No description available"}</p>
-              </div>
-              {errorDetails.status && (
-                <div>
-                  <p className="font-medium text-sm text-red-800">HTTP Status:</p>
-                  <p className="text-sm text-red-700">{errorDetails.status}</p>
+
+              <div className="border-t border-red-200 pt-3">
+                <p className="font-medium text-sm text-red-800 mb-2">Technical Details:</p>
+                <div className="space-y-3">
+                  <div>
+                    <p className="font-medium text-xs text-red-800">Error Type:</p>
+                    <p className="text-sm text-red-700">{(testError || errorDetails)?.error || "Unknown"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-xs text-red-800">Description:</p>
+                    <p className="text-sm text-red-700">
+                      {(testError || errorDetails)?.description || "No description available"}
+                    </p>
+                  </div>
+                  {(testError || errorDetails)?.details && (
+                    <div>
+                      <p className="font-medium text-xs text-red-800">Details:</p>
+                      <pre className="text-xs text-red-700 bg-red-100 p-2 rounded overflow-auto max-h-32">
+                        {JSON.stringify((testError || errorDetails).details, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-medium text-xs text-red-800">Timestamp:</p>
+                    <p className="text-sm text-red-700">{(testError || errorDetails)?.timestamp || "Unknown"}</p>
+                  </div>
                 </div>
-              )}
-              {errorDetails.response && (
-                <div>
-                  <p className="font-medium text-sm text-red-800">Response:</p>
-                  <pre className="text-xs text-red-700 bg-red-100 p-2 rounded overflow-auto max-h-32">
-                    {JSON.stringify(errorDetails.response, null, 2)}
-                  </pre>
-                </div>
-              )}
-              <div>
-                <p className="font-medium text-sm text-red-800">Timestamp:</p>
-                <p className="text-sm text-red-700">{errorDetails.timestamp || "Unknown"}</p>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* OAuth Configuration Debug */}
+      <Card className="bg-blue-50 border-blue-200">
+        <CardHeader>
+          <CardTitle className="text-blue-800 flex items-center justify-between">
+            <div className="flex items-center">
+              <Info className="mr-2 h-4 w-4" />
+              OAuth Configuration Debug
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDebugInfo(!showDebugInfo)}
+              className="h-6 text-xs text-blue-700"
+            >
+              {showDebugInfo ? (
+                <>
+                  <ChevronUp className="mr-1 h-3 w-3" />
+                  Hide Details
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="mr-1 h-3 w-3" />
+                  Show Details
+                </>
+              )}
+            </Button>
+          </CardTitle>
+          {!showDebugInfo && (
+            <CardDescription className="text-blue-700">
+              Your app is deployed at: <code>https://v0-strava-analyer.vercel.app</code>
+              <br />
+              Make sure your Strava app's Authorization Callback Domain is set to:{" "}
+              <code>v0-strava-analyer.vercel.app</code>
+            </CardDescription>
+          )}
+        </CardHeader>
+        {showDebugInfo && (
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <p className="font-medium text-sm text-blue-800">Current App URL:</p>
+                <code className="block mt-1 p-2 bg-white rounded text-sm break-all">
+                  https://v0-strava-analyer.vercel.app
+                </code>
+              </div>
+              <div>
+                <p className="font-medium text-sm text-blue-800">Expected Redirect URI:</p>
+                <code className="block mt-1 p-2 bg-white rounded text-sm break-all">
+                  https://v0-strava-analyer.vercel.app/api/auth/strava/callback
+                </code>
+              </div>
+              <div>
+                <p className="font-medium text-sm text-blue-800">Troubleshooting Steps:</p>
+                <ol className="list-decimal list-inside mt-1 space-y-1 text-sm text-blue-700">
+                  <li>
+                    Go to{" "}
+                    <a
+                      href="https://www.strava.com/settings/api"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline"
+                    >
+                      Strava API Settings
+                    </a>
+                  </li>
+                  <li>
+                    <strong>Double-check your Client ID and Client Secret</strong> - copy them exactly from Strava to
+                    the Developer API tab
+                  </li>
+                  <li>
+                    Verify the "Authorization Callback Domain" is set to:{" "}
+                    <code className="bg-white px-1 rounded">v0-strava-analyer.vercel.app</code>
+                  </li>
+                  <li>Save changes in Strava and try connecting again</li>
+                </ol>
+              </div>
+              {debugInfo && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-sm font-medium text-blue-800">Full Debug Info</summary>
+                  <pre className="mt-2 p-2 bg-white rounded text-xs overflow-auto max-h-40">
+                    {JSON.stringify(debugInfo, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          </CardContent>
+        )}
+      </Card>
     </div>
   )
 }
