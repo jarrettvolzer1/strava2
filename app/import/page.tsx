@@ -7,6 +7,8 @@ import { AlertCircle, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
+export const dynamic = "force-dynamic"
+
 export default async function ImportPage() {
   let connection = null
   let connectionError = false
