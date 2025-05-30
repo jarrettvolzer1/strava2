@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { AlertCircle, CheckCircle, Loader2, ExternalLink, Info, ChevronDown, ChevronUp } from "lucide-react"
+import { AlertCircle, CheckCircle, Loader2, ExternalLink, Info, ChevronDown, ChevronUp, Key } from "lucide-react"
 import { connectStrava, disconnectStrava, testStravaConnection } from "@/lib/actions"
 import { useSearchParams } from "next/navigation"
 
@@ -31,6 +31,8 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const [isDebugging, setIsDebugging] = useState(false)
   const [debugResults, setDebugResults] = useState<any>(null)
+  const [sessionInfo, setSessionInfo] = useState<any>(null)
+  const [isCheckingSession, setIsCheckingSession] = useState(false)
 
   // Fetch debug info on component mount
   useEffect(() => {
@@ -224,6 +226,42 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
     }
   }
 
+  const handleCheckSession = async () => {
+    setIsCheckingSession(true)
+    setSessionInfo(null)
+
+    try {
+      const response = await fetch("/api/debug/session")
+      const data = await response.json()
+      setSessionInfo(data)
+
+      if (data.sessionValid) {
+        toast({
+          title: "Session valid",
+          description: `Logged in as ${data.user.username}`,
+        })
+      } else {
+        toast({
+          title: "Session invalid",
+          description: data.hasSessionToken ? "Session token exists but is invalid" : "No session token found",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      setSessionInfo({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      })
+      toast({
+        title: "Session check failed",
+        description: "Failed to check session",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCheckingSession(false)
+    }
+  }
+
   if (!apiConfigured) {
     return (
       <Alert>
@@ -237,6 +275,58 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
 
   return (
     <div className="space-y-6">
+      {/* Authentication Status */}
+      <Card className="bg-purple-50 border-purple-200">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-purple-800 flex items-center">
+            <Key className="mr-2 h-4 w-4" />
+            Authentication Status
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-purple-700">
+              Check your authentication status before testing the Strava connection
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCheckSession}
+              disabled={isCheckingSession}
+              className="bg-white border-purple-200 text-purple-700 hover:bg-purple-100"
+            >
+              {isCheckingSession && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+              Check Session
+            </Button>
+          </div>
+
+          {sessionInfo && (
+            <div className="mt-4">
+              <div className="flex items-center space-x-2 mb-2">
+                <Badge
+                  variant={sessionInfo.sessionValid ? "default" : "destructive"}
+                  className={sessionInfo.sessionValid ? "bg-green-500" : ""}
+                >
+                  {sessionInfo.sessionValid ? "Authenticated" : "Not Authenticated"}
+                </Badge>
+                {sessionInfo.user && (
+                  <span className="text-sm font-medium">
+                    {sessionInfo.user.username} ({sessionInfo.user.email})
+                  </span>
+                )}
+              </div>
+
+              <details className="text-xs text-purple-700">
+                <summary className="cursor-pointer font-medium">Session Details</summary>
+                <pre className="mt-2 p-2 bg-white rounded overflow-auto max-h-40">
+                  {JSON.stringify(sessionInfo, null, 2)}
+                </pre>
+              </details>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Strava OAuth Authentication Info */}
       <Alert>
         <Info className="h-4 w-4" />
@@ -355,6 +445,7 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
                   <li>Strava application not properly configured</li>
                   <li>Authorization callback domain mismatch</li>
                   <li>Token expired or invalid</li>
+                  <li>Not authenticated (check session status)</li>
                 </ul>
               </div>
 

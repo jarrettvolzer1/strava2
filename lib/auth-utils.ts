@@ -15,11 +15,14 @@ export async function getCurrentUser(): Promise<User | null> {
     const cookieStore = cookies()
     const sessionToken = cookieStore.get("session-token")?.value
 
+    console.log("getCurrentUser - Session token exists:", !!sessionToken)
+
     if (!sessionToken) {
       return null
     }
 
     const user = await verifySession(sessionToken)
+    console.log("getCurrentUser - User found:", user ? `${user.username} (${user.id})` : "No user")
     return user
   } catch (error) {
     console.error("Error getting current user:", error)

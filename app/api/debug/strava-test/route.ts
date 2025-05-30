@@ -2,20 +2,50 @@ import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth-utils"
 import { getStravaConnection } from "@/lib/strava-connection"
 import { getStravaSettings } from "@/lib/system-settings"
+import { cookies } from "next/headers"
+import { verifySession } from "@/lib/simple-auth"
+
+export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
     console.log("=== Strava Debug Test Started ===")
 
-    // Check user authentication
-    const user = await getCurrentUser()
-    console.log("User check:", user ? `Found user: ${user.username} (${user.id})` : "No user found")
+    // Check user authentication - with detailed logging
+    const cookieStore = cookies()
+    const sessionToken = cookieStore.get("session-token")?.value
+    console.log("Session token exists:", !!sessionToken)
+
+    let user = null
+
+    if (sessionToken) {
+      try {
+        user = await verifySession(sessionToken)
+        console.log("Session verification result:", user ? `Valid for user: ${user.username}` : "Invalid session")
+      } catch (error) {
+        console.error("Session verification error:", error)
+      }
+    }
+
+    if (!user) {
+      // Try direct getCurrentUser as fallback
+      try {
+        user = await getCurrentUser()
+        console.log("getCurrentUser result:", user ? `Found user: ${user.username}` : "No user found")
+      } catch (error) {
+        console.error("getCurrentUser error:", error)
+      }
+    }
 
     if (!user) {
       return NextResponse.json({
         success: false,
         error: "User not authenticated",
         step: "authentication",
+        details: {
+          hasSessionToken: !!sessionToken,
+          cookieNames: Array.from(cookieStore.getAll()).map((c) => c.name),
+        },
       })
     }
 

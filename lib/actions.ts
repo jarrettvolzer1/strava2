@@ -2,10 +2,12 @@
 
 import { neon } from "@neondatabase/serverless"
 import { revalidatePath } from "next/cache"
-import { getStravaSettings, setSystemSetting } from "./system-settings"
-import { getActivitiesByDateRange, getAthleteProfile, getActivityById, countActivitiesByDateRange } from "./strava-api"
+import { getStravaSettings, setSystemSetting, updateStravaSettings } from "./system-settings"
+import { getActivitiesByDateRange, getActivityById, countActivitiesByDateRange } from "./strava-api"
 import { getCurrentUser } from "./auth-utils"
 import { getStravaConnection, deleteStravaConnection } from "./strava-connection"
+import { cookies } from "next/headers"
+import { verifySession } from "./simple-auth"
 
 // Initialize the database connection with better error handling
 let sql
@@ -75,70 +77,26 @@ async function executeSqlWithFallback(query, fallbackData, options = {}) {
 export { executeSqlWithFallback }
 
 export async function connectStrava() {
-  try {
-    // Get settings from database
-    const settings = await getStravaSettings()
+  const settings = await getStravaSettings()
 
-    if (!settings.isConfigured) {
-      throw new Error("Strava API is not configured. Please set up your credentials first.")
-    }
-
-    // Get the base URL from settings or use a fallback
-    const baseUrl = settings.appUrl || process.env.NEXT_PUBLIC_APP_URL
-
-    if (!baseUrl) {
-      throw new Error("App URL is not configured. Please set the APP_URL in your settings.")
-    }
-
-    // Ensure the baseUrl doesn't have a trailing slash
-    const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl
-
-    // Construct the redirect URI - this MUST match exactly what Strava expects
-    const redirectUri = `${normalizedBaseUrl}/api/auth/strava/callback`
-
-    console.log("OAuth Configuration:")
-    console.log("- Base URL:", baseUrl)
-    console.log("- Normalized Base URL:", normalizedBaseUrl)
-    console.log("- Redirect URI:", redirectUri)
-    console.log("- Client ID:", settings.clientId)
-
-    // Validate the redirect URI format
-    try {
-      new URL(redirectUri)
-    } catch (urlError) {
-      throw new Error(`Invalid redirect URI format: ${redirectUri}. Please check your APP_URL setting.`)
-    }
-
-    // Generate the authorization URL with proper scopes for activity access
-    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${settings.clientId}&redirect_uri=${encodeURIComponent(
-      redirectUri,
-    )}&response_type=code&scope=read,activity:read_all&approval_prompt=force`
-
-    console.log("Generated auth URL:", authUrl)
-
-    return { authUrl, redirectUri }
-  } catch (error) {
-    console.error("Failed to generate Strava auth URL:", error)
-    throw new Error(`Failed to connect to Strava: ${error instanceof Error ? error.message : "Unknown error"}`)
+  if (!settings.isConfigured) {
+    throw new Error("Strava API is not configured")
   }
+
+  const { clientId, appUrl } = settings
+  const redirectUri = `${appUrl}/api/auth/strava/callback`
+  const scope = "read,activity:read_all"
+
+  const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
+    redirectUri,
+  )}&response_type=code&scope=${scope}`
+
+  return { authUrl }
 }
 
 export async function disconnectStrava() {
-  try {
-    const success = await deleteStravaConnection()
-
-    if (!success) {
-      throw new Error("Failed to delete Strava connection")
-    }
-
-    revalidatePath("/settings")
-    revalidatePath("/")
-
-    return { success: true }
-  } catch (error) {
-    console.error("Failed to disconnect from Strava:", error)
-    throw new Error("Failed to disconnect from Strava")
-  }
+  await deleteStravaConnection()
+  return { success: true }
 }
 
 export async function getStravaConnectionStatus() {
@@ -166,53 +124,65 @@ export async function testStravaConnection() {
   try {
     console.log("Testing Strava connection...")
 
-    // Test the connection by fetching the athlete profile
-    const profile = await getAthleteProfile()
-    console.log("Athlete profile fetched successfully:", profile.id)
+    // Try to get user from session token first
+    const cookieStore = cookies()
+    const sessionToken = cookieStore.get("session-token")?.value
+    console.log("Session token exists:", !!sessionToken)
 
-    return { success: true, profile }
-  } catch (error) {
-    console.error("Failed to test Strava connection:", error)
+    let user = null
 
-    // Provide more specific error messages with detailed logging
-    let errorMessage = "Failed to test Strava connection"
-    const errorDetails = {
-      originalError: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      timestamp: new Date().toISOString(),
-    }
-
-    if (error instanceof Error) {
-      if (error.message.includes("Authentication failed") || error.message.includes("401")) {
-        errorMessage = "Authentication failed. Please reconnect your Strava account."
-        errorDetails.cause = "Invalid or expired access token"
-      } else if (error.message.includes("No Strava connection found")) {
-        errorMessage = "No Strava connection found. Please connect your account first."
-        errorDetails.cause = "Missing database connection record"
-      } else if (error.message.includes("Token refresh failed")) {
-        errorMessage = "Token refresh failed. Please reconnect your Strava account."
-        errorDetails.cause = "Unable to refresh expired token"
-      } else if (error.message.includes("fetch")) {
-        errorMessage = "Network error connecting to Strava API"
-        errorDetails.cause = "Network connectivity issue"
-      } else {
-        errorMessage = error.message
-        errorDetails.cause = "Unknown error"
+    if (sessionToken) {
+      try {
+        user = await verifySession(sessionToken)
+        console.log("Session verification result:", user ? `Valid for user: ${user.username}` : "Invalid session")
+      } catch (error) {
+        console.error("Session verification error:", error)
       }
     }
 
-    // Log detailed error information for debugging
-    console.error("Detailed test error:", {
-      message: errorMessage,
-      details: errorDetails,
-      error: error,
+    if (!user) {
+      // Try direct getCurrentUser as fallback
+      try {
+        user = await getCurrentUser()
+        console.log("getCurrentUser result:", user ? `Found user: ${user.username}` : "No user found")
+      } catch (error) {
+        console.error("getCurrentUser error:", error)
+      }
+    }
+
+    if (!user) {
+      throw new Error("User not authenticated")
+    }
+
+    // Get Strava connection
+    const connection = await getStravaConnection()
+    if (!connection) {
+      throw new Error("No Strava connection found")
+    }
+
+    console.log("Found connection for athlete ID:", connection.athlete_id)
+
+    // Test the connection by making a request to the Strava API
+    const response = await fetch("https://www.strava.com/api/v3/athlete", {
+      headers: {
+        Authorization: `Bearer ${connection.access_token}`,
+        Accept: "application/json",
+      },
     })
 
-    // Create a more informative error
-    const enhancedError = new Error(errorMessage)
-    enhancedError.cause = errorDetails
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error("Strava API error:", errorText)
+      throw new Error(`Strava API returned ${response.status}: ${response.statusText}`)
+    }
 
-    throw enhancedError
+    const profile = await response.json()
+    console.log("Successfully connected to Strava as:", profile.firstname, profile.lastname)
+
+    return { profile }
+  } catch (error) {
+    console.error("Test connection error:", error)
+    throw error
   }
 }
 
@@ -890,6 +860,16 @@ export async function saveStravaSettings({
   }
 }
 
+export async function updateStravaApi(clientId: string, clientSecret: string) {
+  await updateStravaSettings({
+    clientId,
+    clientSecret,
+    isConfigured: true,
+  })
+
+  return { success: true }
+}
+
 // Helper function to generate mock activities
 function generateMockActivities(startDate: string, endDate: string) {
   const start = new Date(startDate)
@@ -939,10 +919,6 @@ function generateMockActivities(startDate: string, endDate: string) {
         break
       case "Kayaking":
         distance = Math.random() * 12000 + 3000 // 3-15km
-        elapsed_time =
-          Math.floor(distance / 2.5) * // ~2.5 m/s pace
-            12000 +
-          3000 // 3-15km
         elapsed_time = Math.floor(distance / 2.5) // ~2.5 m/s pace
     }
 

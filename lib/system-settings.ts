@@ -66,6 +66,43 @@ export async function deleteSystemSetting(key: string): Promise<boolean> {
   }
 }
 
+// Update Strava settings helper
+export async function updateStravaSettings(settings: {
+  clientId?: string
+  clientSecret?: string
+  webhookVerifyToken?: string
+  appUrl?: string
+  accessToken?: string
+  refreshToken?: string
+  isConfigured?: boolean
+}) {
+  try {
+    if (settings.clientId) {
+      await setSystemSetting("STRAVA_CLIENT_ID", settings.clientId)
+    }
+    if (settings.clientSecret) {
+      await setSystemSetting("STRAVA_CLIENT_SECRET", settings.clientSecret)
+    }
+    if (settings.webhookVerifyToken) {
+      await setSystemSetting("STRAVA_WEBHOOK_VERIFY_TOKEN", settings.webhookVerifyToken)
+    }
+    if (settings.appUrl) {
+      await setSystemSetting("APP_URL", settings.appUrl)
+    }
+    if (settings.accessToken) {
+      await setSystemSetting("STRAVA_ACCESS_TOKEN", settings.accessToken)
+    }
+    if (settings.refreshToken) {
+      await setSystemSetting("STRAVA_REFRESH_TOKEN", settings.refreshToken)
+    }
+
+    return true
+  } catch (error) {
+    console.error("Error updating Strava settings:", error)
+    return false
+  }
+}
+
 // Strava specific settings
 export async function getStravaSettings() {
   try {
