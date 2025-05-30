@@ -1,8 +1,77 @@
 import { neon } from "@neondatabase/serverless"
 import { getStravaSettings } from "./system-settings"
 import { getCurrentUser } from "./auth-utils"
+import { getStravaConnection } from "./strava-connection"
 
 const sql = neon(process.env.DATABASE_URL!)
+
+// Helper function to check if token is expired
+function isTokenExpired(connection: any): boolean {
+  const expiresAt = new Date(connection.expires_at)
+  // Consider token expired if it expires within the next 5 minutes
+  return expiresAt.getTime() < Date.now() + 5 * 60 * 1000
+}
+
+// Helper function to refresh access token
+async function refreshAccessToken(connection: any) {
+  try {
+    const settings = await getStravaSettings()
+
+    if (!settings.isConfigured) {
+      throw new Error("Strava API is not configured")
+    }
+
+    console.log("Refreshing token with client ID:", settings.clientId)
+
+    const refreshResponse = await fetch("https://www.strava.com/oauth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: settings.clientId,
+        client_secret: settings.clientSecret,
+        refresh_token: connection.refresh_token,
+        grant_type: "refresh_token",
+      }),
+      cache: "no-store",
+    })
+
+    if (!refreshResponse.ok) {
+      const errorData = await refreshResponse.json().catch(() => ({}))
+      console.error("Token refresh failed:", refreshResponse.status, refreshResponse.statusText, errorData)
+      throw new Error(`Token refresh failed (${refreshResponse.status})`)
+    }
+
+    const tokenData = await refreshResponse.json()
+    console.log("Token refreshed successfully, new expires_at:", new Date(tokenData.expires_at * 1000).toISOString())
+
+    // Update the connection with the new tokens
+    const user = await getCurrentUser()
+    if (!user?.id) {
+      throw new Error("User not authenticated")
+    }
+
+    await sql`
+      UPDATE strava_connections
+      SET 
+        access_token = ${tokenData.access_token},
+        refresh_token = ${tokenData.refresh_token},
+        expires_at = ${new Date(tokenData.expires_at * 1000)},
+        updated_at = ${new Date()}
+      WHERE simple_user_id = ${user.id}
+    `
+
+    return {
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      expires_at: new Date(tokenData.expires_at * 1000),
+    }
+  } catch (error) {
+    console.error("Error during token refresh:", error)
+    throw error
+  }
+}
 
 // Function to get a valid access token, refreshing if necessary
 export async function getValidAccessToken() {
@@ -113,38 +182,71 @@ export async function getValidAccessToken() {
 // Function to fetch athlete profile
 export async function getAthleteProfile() {
   try {
-    const accessToken = await getValidAccessToken()
-
     console.log("Fetching athlete profile...")
+
+    const connection = await getStravaConnection()
+    if (!connection) {
+      throw new Error("No Strava connection found")
+    }
+
+    console.log("Found connection for athlete:", connection.athlete_id)
+
+    // Check if token is expired
+    if (isTokenExpired(connection)) {
+      console.log("Token expired, attempting refresh...")
+      try {
+        const refreshedConnection = await refreshAccessToken(connection)
+        if (!refreshedConnection) {
+          throw new Error("Token refresh failed")
+        }
+        connection.access_token = refreshedConnection.access_token
+        connection.expires_at = refreshedConnection.expires_at
+      } catch (refreshError) {
+        console.error("Token refresh failed:", refreshError)
+        throw new Error(
+          "Token refresh failed: " + (refreshError instanceof Error ? refreshError.message : "Unknown error"),
+        )
+      }
+    }
+
+    console.log("Making API request to Strava...")
     const response = await fetch("https://www.strava.com/api/v3/athlete", {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${connection.access_token}`,
+        Accept: "application/json",
       },
-      cache: "no-store",
     })
 
-    console.log("Athlete profile response status:", response.status)
+    console.log("Strava API response status:", response.status)
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      console.error("Failed to fetch athlete profile:", response.status, response.statusText, errorData)
+      const errorText = await response.text()
+      console.error("Strava API error response:", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      })
 
       if (response.status === 401) {
-        throw new Error("Authentication failed. Please reconnect your Strava account in Settings.")
+        throw new Error("Authentication failed - invalid or expired token")
+      } else if (response.status === 403) {
+        throw new Error("Access forbidden - insufficient permissions")
+      } else if (response.status === 429) {
+        throw new Error("Rate limit exceeded - too many requests")
+      } else {
+        throw new Error(`Strava API error: ${response.status} ${response.statusText} - ${errorText}`)
       }
-
-      throw new Error(`Failed to fetch athlete profile: ${response.status} ${response.statusText}`)
     }
 
     const profile = await response.json()
-    console.log("Athlete profile fetched successfully:", {
+    console.log("Successfully fetched athlete profile:", {
       id: profile.id,
       name: `${profile.firstname} ${profile.lastname}`,
     })
 
     return profile
   } catch (error) {
-    console.error("Error fetching athlete profile:", error)
+    console.error("Error in getAthleteProfile:", error)
     throw error
   }
 }

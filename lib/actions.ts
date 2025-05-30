@@ -174,20 +174,45 @@ export async function testStravaConnection() {
   } catch (error) {
     console.error("Failed to test Strava connection:", error)
 
-    // Provide more specific error messages
+    // Provide more specific error messages with detailed logging
     let errorMessage = "Failed to test Strava connection"
-
-    if (error.message.includes("Authentication failed") || error.message.includes("401")) {
-      errorMessage = "Authentication failed. Please reconnect your Strava account."
-    } else if (error.message.includes("No Strava connection found")) {
-      errorMessage = "No Strava connection found. Please connect your account first."
-    } else if (error.message.includes("Token refresh failed")) {
-      errorMessage = "Token refresh failed. Please reconnect your Strava account."
-    } else {
-      errorMessage = error.message
+    const errorDetails = {
+      originalError: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
     }
 
-    throw new Error(errorMessage)
+    if (error instanceof Error) {
+      if (error.message.includes("Authentication failed") || error.message.includes("401")) {
+        errorMessage = "Authentication failed. Please reconnect your Strava account."
+        errorDetails.cause = "Invalid or expired access token"
+      } else if (error.message.includes("No Strava connection found")) {
+        errorMessage = "No Strava connection found. Please connect your account first."
+        errorDetails.cause = "Missing database connection record"
+      } else if (error.message.includes("Token refresh failed")) {
+        errorMessage = "Token refresh failed. Please reconnect your Strava account."
+        errorDetails.cause = "Unable to refresh expired token"
+      } else if (error.message.includes("fetch")) {
+        errorMessage = "Network error connecting to Strava API"
+        errorDetails.cause = "Network connectivity issue"
+      } else {
+        errorMessage = error.message
+        errorDetails.cause = "Unknown error"
+      }
+    }
+
+    // Log detailed error information for debugging
+    console.error("Detailed test error:", {
+      message: errorMessage,
+      details: errorDetails,
+      error: error,
+    })
+
+    // Create a more informative error
+    const enhancedError = new Error(errorMessage)
+    enhancedError.cause = errorDetails
+
+    throw enhancedError
   }
 }
 
@@ -914,8 +939,11 @@ function generateMockActivities(startDate: string, endDate: string) {
         break
       case "Kayaking":
         distance = Math.random() * 12000 + 3000 // 3-15km
+        elapsed_time =
+          Math.floor(distance / 2.5) * // ~2.5 m/s pace
+            12000 +
+          3000 // 3-15km
         elapsed_time = Math.floor(distance / 2.5) // ~2.5 m/s pace
-        break
     }
 
     activities.push({

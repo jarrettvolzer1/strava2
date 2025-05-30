@@ -29,6 +29,8 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
   const [testError, setTestError] = useState<any>(null)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [debugInfo, setDebugInfo] = useState<any>(null)
+  const [isDebugging, setIsDebugging] = useState(false)
+  const [debugResults, setDebugResults] = useState<any>(null)
 
   // Fetch debug info on component mount
   useEffect(() => {
@@ -133,15 +135,22 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
       setTestError(null)
     } catch (error) {
       setConnectionStatus("error")
+
+      console.error("Test connection error:", error)
+
+      // Extract more detailed error information
       const errorData = {
         error: "test_failed",
         description: error instanceof Error ? error.message : "Failed to test Strava connection",
         timestamp: new Date().toISOString(),
         details: {
           message: error instanceof Error ? error.message : "Unknown error",
+          cause: error instanceof Error && error.cause ? error.cause : undefined,
           stack: error instanceof Error ? error.stack : undefined,
+          name: error instanceof Error ? error.name : undefined,
         },
       }
+
       setTestError(errorData)
       toast({
         title: "Connection test failed",
@@ -175,6 +184,43 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
       })
     } finally {
       setIsDisconnecting(false)
+    }
+  }
+
+  const handleDebugTest = async () => {
+    setIsDebugging(true)
+    setDebugResults(null)
+
+    try {
+      const response = await fetch("/api/debug/strava-test")
+      const results = await response.json()
+      setDebugResults(results)
+
+      if (results.success) {
+        toast({
+          title: "Debug test successful",
+          description: "All connection components are working correctly",
+        })
+      } else {
+        toast({
+          title: "Debug test failed",
+          description: `Failed at step: ${results.step}`,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      setDebugResults({
+        success: false,
+        error: "Failed to run debug test",
+        details: error instanceof Error ? error.message : "Unknown error",
+      })
+      toast({
+        title: "Debug test error",
+        description: "Failed to run debug test",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDebugging(false)
     }
   }
 
@@ -267,6 +313,10 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
                   {isTesting && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
                   Test
                 </Button>
+                <Button variant="outline" size="sm" onClick={handleDebugTest} disabled={isDebugging}>
+                  {isDebugging && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+                  Debug
+                </Button>
                 <Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={isDisconnecting}>
                   {isDisconnecting && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
                   Disconnect
@@ -336,6 +386,29 @@ export function UserConnection({ initialConnection, apiConfigured }: UserConnect
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {debugResults && (
+        <Card className={debugResults.success ? "border-green-200 bg-green-50" : "border-orange-200 bg-orange-50"}>
+          <CardHeader>
+            <CardTitle className={`${debugResults.success ? "text-green-800" : "text-orange-800"} flex items-center`}>
+              <Info className="mr-2 h-4 w-4" />
+              Debug Test Results
+            </CardTitle>
+            <CardDescription className={debugResults.success ? "text-green-700" : "text-orange-700"}>
+              {debugResults.success
+                ? "All connection components tested successfully"
+                : `Failed at step: ${debugResults.step}`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre
+              className={`text-xs ${debugResults.success ? "text-green-700 bg-green-100" : "text-orange-700 bg-orange-100"} p-2 rounded overflow-auto max-h-64`}
+            >
+              {JSON.stringify(debugResults, null, 2)}
+            </pre>
           </CardContent>
         </Card>
       )}
