@@ -1,43 +1,15 @@
-"use client"
+import { redirect } from "next/navigation"
+import { cookies } from "next/headers"
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+export default async function HomePage() {
+  const cookieStore = cookies()
+  const sessionToken = cookieStore.get("session")?.value
 
-export default function HomePage() {
-  const router = useRouter()
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("/api/auth/me")
-        if (response.ok) {
-          const data = await response.json()
-          if (data.authenticated) {
-            router.push("/dashboard")
-          } else {
-            router.push("/login")
-          }
-        } else {
-          router.push("/login")
-        }
-      } catch (error) {
-        router.push("/login")
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    checkAuth()
-  }, [router])
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading...</div>
-      </div>
-    )
+  if (sessionToken) {
+    // User is logged in, redirect to dashboard
+    redirect("/dashboard")
   }
 
-  return null
+  // User is not logged in, show login page
+  redirect("/login")
 }

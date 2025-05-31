@@ -1,104 +1,49 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { getSessionUser } from "@/lib/simple-auth"
 
-// Rate limiting store (in production, use Redis)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>()
-
-function rateLimit(ip: string, maxRequests = 10, windowMs = 60000): boolean {
-  const now = Date.now()
-  const key = `rate_limit_${ip}`
-  const record = rateLimitStore.get(key)
-
-  if (!record || now > record.resetTime) {
-    rateLimitStore.set(key, { count: 1, resetTime: now + windowMs })
-    return true
-  }
-
-  if (record.count >= maxRequests) {
-    return false
-  }
-
-  record.count++
-  return true
-}
-
-export async function middleware(request: NextRequest) {
+export function middleware(request: NextRequest) {
+  const sessionToken = request.cookies.get("session")?.value
   const { pathname } = request.nextUrl
-  const ip = request.ip || request.headers.get("x-forwarded-for") || "unknown"
 
-  // Rate limiting for login attempts
-  if (pathname === "/api/auth/login" && request.method === "POST") {
-    if (!rateLimit(ip, 5, 300000)) {
-      // 5 attempts per 5 minutes
-      return NextResponse.json({ error: "Too many login attempts. Please try again later." }, { status: 429 })
-    }
+  // Public routes that don't require authentication
+  const publicRoutes = [
+    "/login",
+    "/signup",
+    "/set-password",
+    "/api/auth/login",
+    "/api/auth/signup",
+    "/api/auth/set-password",
+    "/api/auth/strava/callback",
+    "/api/health",
+    "/maintenance",
+    "/setup",
+  ]
+
+  // Check if the current path is public
+  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route))
+
+  // If user is not authenticated and trying to access protected route
+  if (!sessionToken && !isPublicRoute) {
+    return NextResponse.redirect(new URL("/login", request.url))
   }
 
-  // Rate limiting for API routes
-  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
-    if (!rateLimit(ip, 100, 60000)) {
-      // 100 requests per minute
-      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
-    }
+  // If user is authenticated and trying to access login/signup
+  if (sessionToken && (pathname === "/login" || pathname === "/signup")) {
+    return NextResponse.redirect(new URL("/dashboard", request.url))
   }
 
-  // Protect admin routes
-  if (pathname.startsWith("/admin")) {
-    const sessionToken = request.cookies.get("session")?.value
-    if (!sessionToken) {
-      return NextResponse.redirect(new URL("/login", request.url))
-    }
-
-    try {
-      const user = await getSessionUser(sessionToken)
-      if (!user || user.role !== "admin") {
-        return NextResponse.redirect(new URL("/dashboard", request.url))
-      }
-    } catch (error) {
-      return NextResponse.redirect(new URL("/login", request.url))
-    }
-  }
-
-  // Protect authenticated routes
-  if (
-    pathname.startsWith("/(authenticated)") ||
-    pathname === "/dashboard" ||
-    pathname === "/settings" ||
-    pathname === "/activities" ||
-    pathname === "/activities-client" ||
-    pathname === "/import"
-  ) {
-    const sessionToken = request.cookies.get("session")?.value
-    if (!sessionToken) {
-      return NextResponse.redirect(new URL("/login", request.url))
-    }
-
-    try {
-      const user = await getSessionUser(sessionToken)
-      if (!user) {
-        return NextResponse.redirect(new URL("/login", request.url))
-      }
-    } catch (error) {
-      return NextResponse.redirect(new URL("/login", request.url))
-    }
-  }
-
-  // Add security headers
-  const response = NextResponse.next()
-
-  response.headers.set("X-Content-Type-Options", "nosniff")
-  response.headers.set("X-Frame-Options", "DENY")
-  response.headers.set("X-XSS-Protection", "1; mode=block")
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-  response.headers.set(
-    "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.strava.com;",
-  )
-
-  return response
+  return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 }
