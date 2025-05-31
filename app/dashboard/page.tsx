@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import DashboardWrapper from "@/components/dashboard-wrapper"
 
+export const dynamic = "force-dynamic"
+
 export default function DashboardPage() {
   const router = useRouter()
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
