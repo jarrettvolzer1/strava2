@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [debugInfo, setDebugInfo] = useState("")
 
   // Get redirect URL from query params
   const redirectUrl = searchParams.get("redirect") || "/dashboard"
@@ -39,28 +40,57 @@ export default function LoginPage() {
     }
   }, [loginError])
 
+  const testSession = async () => {
+    try {
+      const response = await fetch("/api/auth/test-session")
+      const data = await response.json()
+      setDebugInfo(JSON.stringify(data, null, 2))
+    } catch (error) {
+      setDebugInfo("Error testing session: " + error.message)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
     setLoading(true)
+    setDebugInfo("")
 
     try {
+      console.log("Submitting login for:", username)
+
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
+        credentials: "include", // Important for cookies
       })
 
       const data = await response.json()
+      console.log("Login response:", data)
 
       if (response.ok && data.success) {
+        console.log("Login successful, user:", data.user)
+
+        // Test the session immediately after login
+        setTimeout(async () => {
+          const sessionTest = await fetch("/api/auth/test-session", { credentials: "include" })
+          const sessionData = await sessionTest.json()
+          console.log("Session test after login:", sessionData)
+        }, 100)
+
         if (data.user.password_set === false) {
           router.push("/set-password")
         } else {
-          // Redirect to the original destination or dashboard
-          router.push(redirectUrl)
+          // Small delay to ensure cookie is set
+          setTimeout(() => {
+            console.log("Redirecting to:", redirectUrl)
+            router.push(redirectUrl)
+            router.refresh() // Force a refresh to update auth state
+          }, 100)
         }
       } else {
+        console.log("Login failed:", data.error)
         setError(data.error || "Login failed")
       }
     } catch (error) {
@@ -120,6 +150,14 @@ export default function LoginPage() {
               <p className="text-xs text-blue-600">First time users can leave password blank</p>
             </div>
             {error && <p className="text-sm text-red-500 bg-red-50 p-2 rounded border border-red-200">{error}</p>}
+
+            {/* Debug section */}
+            <div className="space-y-2">
+              <Button type="button" onClick={testSession} variant="outline" size="sm">
+                Test Session
+              </Button>
+              {debugInfo && <pre className="text-xs bg-gray-100 p-2 rounded overflow-auto max-h-32">{debugInfo}</pre>}
+            </div>
           </CardContent>
           <CardFooter className="p-6 pt-0">
             <Button
