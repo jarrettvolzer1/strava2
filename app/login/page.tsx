@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [debugInfo, setDebugInfo] = useState("")
+  const [redirecting, setRedirecting] = useState(false)
 
   // Get redirect URL from query params
   const redirectUrl = searchParams.get("redirect") || "/dashboard"
@@ -42,7 +43,7 @@ export default function LoginPage() {
 
   const testSession = async () => {
     try {
-      const response = await fetch("/api/auth/test-session")
+      const response = await fetch("/api/auth/test-session", { credentials: "include" })
       const data = await response.json()
       setDebugInfo(JSON.stringify(data, null, 2))
     } catch (error) {
@@ -63,7 +64,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
-        credentials: "include", // Important for cookies
+        credentials: "include",
       })
 
       const data = await response.json()
@@ -71,34 +72,52 @@ export default function LoginPage() {
 
       if (response.ok && data.success) {
         console.log("Login successful, user:", data.user)
+        setRedirecting(true)
 
         // Test the session immediately after login
-        setTimeout(async () => {
-          const sessionTest = await fetch("/api/auth/test-session", { credentials: "include" })
-          const sessionData = await sessionTest.json()
-          console.log("Session test after login:", sessionData)
-        }, 100)
+        const sessionTest = await fetch("/api/auth/test-session", { credentials: "include" })
+        const sessionData = await sessionTest.json()
+        console.log("Session test after login:", sessionData)
+
+        if (!sessionData.authenticated) {
+          setError("Session creation failed - please try again")
+          setRedirecting(false)
+          setLoading(false)
+          return
+        }
 
         if (data.user.password_set === false) {
-          router.push("/set-password")
+          console.log("Redirecting to set password")
+          window.location.href = "/set-password"
         } else {
-          // Small delay to ensure cookie is set
-          setTimeout(() => {
-            console.log("Redirecting to:", redirectUrl)
-            router.push(redirectUrl)
-            router.refresh() // Force a refresh to update auth state
-          }, 100)
+          console.log("Redirecting to:", redirectUrl)
+          // Use window.location.href for a full page reload to ensure auth state is fresh
+          window.location.href = redirectUrl
         }
       } else {
         console.log("Login failed:", data.error)
         setError(data.error || "Login failed")
+        setLoading(false)
       }
     } catch (error) {
       console.error("Login error:", error)
       setError("An unexpected error occurred")
-    } finally {
       setLoading(false)
     }
+  }
+
+  if (redirecting) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        <Card className="w-full max-w-md shadow-xl border-0 bg-white/95 backdrop-blur-sm">
+          <CardContent className="p-8 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg font-medium">Login successful!</p>
+            <p className="text-sm text-gray-600">Redirecting to dashboard...</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
